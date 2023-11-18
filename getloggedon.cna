@@ -1,0 +1,205 @@
+########################################
+# Enumerations
+########################################
+
+%reghives = %(
+    HKCR => 0,
+    HKCU => 1,
+    HKLM => 2,
+    HKU  => 3
+);
+#sleep can't handle the actual values... so we'll just add them on the c side :(
+
+%regtypes = %(
+    REG_SZ => 1,
+    REG_EXPAND_SZ => 2,
+    REG_BINARY => 3,
+    REG_DWORD => 4,
+    REG_MULTI_SZ => 7,
+    REG_QWORD => 11
+);
+
+%inttypes = %(
+    REG_DWORD => 1,
+    REG_QWORD => 1
+);
+
+%servicetypes = %(
+    1 => 0x02,
+    2 => 0x01,
+    3 => 0x10,
+    4 => 0x20
+);
+
+$id_lastpass = "LASTPASS>>";
+
+########################################
+# Helper functions
+########################################
+
+#readbof INPUTFILE
+sub readbof
+{
+    local('$barch $bof_filename $handle $data $args');
+    $barch  = barch($1);
+
+    # read in the right BOF file
+    $bof_filename = script_resource("$2 $+ / $+ $2 $+ . $+ $barch $+ .o");
+    println("Loading $bof_filename");
+    $handle = openf($bof_filename);
+    $data   = readb($handle, -1);
+    closef($handle);
+    if(strlen($data) == 0)
+    {
+        berror($1, "Could not read BOF file: $bof_filename");
+    }
+
+    btask($1, "Loaded $2 for $barch");
+    return $data;
+}
+
+#random_string
+sub random_string
+{
+    $limit = $1;
+    @random_str = @();
+    $characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for ($x = 0; $x < $limit; $x++) {
+        $n = rand(strlen($characters));
+        add(@random_str, charAt($characters, $n));
+    }
+    return join('', @random_str);
+};
+
+# subroutine to parse options for script.
+# Returns options as a hash
+sub ops {
+	local('$count');
+	$count = 0;
+	%arguments = ohash();
+	foreach $arg ($1) {
+		if ($count > 0) {
+			if ($arg ismatch '/.*:.*') {
+				$arg = replace($arg, '\A/',"");
+				($key, $val) = split(":", $arg, 2);
+				%arguments[$key] = $val;
+			}
+			else if ($arg ismatch '/.*') {
+				$arg = replace($arg, '\A/',"");
+				%arguments[$arg] = "TRUE";
+			}
+			else {
+				%arguments["$count"] = $arg;
+			}
+		}
+		$count = $count + 1;
+	}
+	return (%arguments);
+}
+
+#getloggedon getloggedon <OPT:HOSTNAME>
+alias getloggedon
+{
+    # I need hostname Hive
+    # test if val in pos 1 is in Hive, if not, then assume it is a hostname
+    # values at end, if multisz pack them using a variable bof string
+
+    local('$hostname $packstr $regstr $buffer $fp');
+
+    $packstr = "zizzi";
+
+    if(size(@_) < 1)
+    {
+        berror($1, beacon_command_detail("getloggedon"));
+        return;
+    }
+    else
+    {
+        if($2 in %reghives)
+        {
+            #targeting local system
+            $hostname = $null;
+            $i = 1;
+        }
+        else{
+            $hostname = "\\\\" . $2;
+            $i = 2;
+        }
+        if (@_[$i] in %reghives)
+        {
+            $hive = %reghives[@_[$i]];
+            $i++;
+        }
+        else
+        {
+            berror($1, beacon_command_detail("getloggedon"));
+            berror($1, "Provided registry hive value is invalid");
+            return;
+        }
+        $path = @_[$i];
+        $i++;
+        $key = @_[$i];
+        $i++;
+        if( @_[$i] in %regtypes)
+        {
+            $regstr = @_[$i];
+            $type = %regtypes[@_[$i]];
+            $i++;
+            if ($regstr in %inttypes)
+            {
+                $packstr = $packstr . "b";
+                $value =  pack("I-", @_[$i]);
+            }
+            else if ($regstr eq "REG_MULTI_SZ")
+            {
+                $packstr = $packstr . "b";
+                $buffer = allocate(0);
+                for (; $i < size(@_); $i++)
+                {
+                    bwrite($buffer, "z", @_[$i]);
+                }
+                bwrite($buffer, "z", ""); # null terminator at end
+                closef($buffer);
+                $value = readb($buffer, -1);
+
+            }
+            else if ($regstr eq "REG_EXPAND_SZ" || $regstr eq "REG_SZ")
+            {
+                $packstr = $packstr . "z";
+                $value = @_[$i];
+            }
+            else if ($regstr eq "REG_BINARY")
+            {
+                if (!-canread @_[$i])
+                {
+                    berror($1, "File " . @_[$i] . " Could not be found");
+                    return;
+                }
+                $fp = openf(@_[$i]);
+                $value = readb($fp, -1);
+                $packstr = $packstr . "b";
+                closef($fp);
+            }
+        }
+        else
+        {
+            berror($1, beacon_command_detail("reg_set"));
+            berror($1, "Provided registry type value is invalid");
+            return;
+        }
+        $args = bof_pack($1, $packstr, $hostname);
+
+        beacon_inline_execute($1, readbof($1, "getloggedon"), "go", $args);
+    }
+}
+
+beacon_command_register(
+    "getloggedon",
+    "Gets logged on users on remote machine, using low-level cred access.",
+    "
+Command: getloggedon
+Summary: This command gets logged on users on remote machine, using low-level cred access..
+Usage:   getloggedon <OPT:HOSTNAME>
+         HOSTNAME Optional. The host to connect to and run the command on.
+"
+);
