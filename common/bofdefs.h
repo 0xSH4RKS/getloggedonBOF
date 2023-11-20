@@ -15,6 +15,10 @@
 #include <shlwapi.h>
 #include <sddl.h>
 
+// to try
+#include <ntsecapi.h>
+
+
 
 //KERNEL32
 #ifdef BOF
@@ -211,6 +215,14 @@ WINBASEAPI BOOLEAN WINAPI SECUR32$GetUserNameExA (int NameFormat, LPSTR lpNameBu
 WINBASEAPI LPSTR WINAPI SHLWAPI$StrStrIA(LPCSTR lpFirst,LPCSTR lpSrch);
 
 //advapi32
+// LSA SHIT
+WINADVAPI WINBOOL WINAPI ADVAPI32$LsaLookupSids (LSA_HANDLE PolicyHandle, ULONG Count, PSID *Sids, PLSA_REFERENCED_DOMAIN_LIST *ReferencedDomains, PLSA_TRANSLATED_NAME *Names);
+DECLSPEC_IMPORT ULONG WINAPI ADVAPI32$LsaNtStatusToWinError (NTSTATUS Status);
+WINBASEAPI NTSTATUS NTAPI ADVAPI32$LsaFreeMemory(PVOID Buffer);
+WINBASEAPI NTSTATUS NTAPI ADVAPI32$LsaOpenPolicy(PLSA_UNICODE_STRING SystemName, PLSA_OBJECT_ATTRIBUTES ObjectAttributes, ACCESS_MASK DesiredAccess, PLSA_HANDLE PolicyHandle);
+WINBASEAPI NTSTATUS NTAPI ADVAPI32$LsaClose(LSA_HANDLE ObjectHandle);
+
+// LSA SHIT
 WINADVAPI WINBOOL WINAPI ADVAPI32$OpenProcessToken (HANDLE ProcessHandle, DWORD DesiredAccess, PHANDLE TokenHandle);
 WINADVAPI WINBOOL WINAPI ADVAPI32$GetTokenInformation (HANDLE TokenHandle, TOKEN_INFORMATION_CLASS TokenInformationClass, LPVOID TokenInformation, DWORD TokenInformationLength, PDWORD ReturnLength);
 WINADVAPI WINBOOL WINAPI ADVAPI32$ConvertSidToStringSidA(PSID Sid,LPSTR *StringSid);
@@ -627,6 +639,15 @@ DECLSPEC_IMPORT WINBOOL WINAPI VERSION$VerQueryValueA(LPCVOID pBlock, LPCSTR lpS
 #define USER32$EnumChildWindows EnumChildWindows
 #define SECUR32$GetUserNameExA  GetUserNameExA 
 #define SHLWAPI$StrStrIA StrStrIA
+
+// LSA SHIT
+#define ADVAPI32$LsaLookupSids LsaLookupSids
+#define ADVAPI32$LsaNtStatusToWinError LsaNtStatusToWinError
+#define ADVAPI32$LsaFreeMemory LsaFreeMemory
+#define ADVAPI32$LsaOpenPolicy LsaOpenPolicy
+#define ADVAPI32$LsaClose LsaClose
+// LSA SHIT
+
 #define ADVAPI32$OpenProcessToken  OpenProcessToken 
 #define ADVAPI32$GetTokenInformation  GetTokenInformation 
 #define ADVAPI32$ConvertSidToStringSidA ConvertSidToStringSidA

@@ -1,6 +1,7 @@
 #include <windows.h>
-#include <ntsecapi.h>
+
 #include <ntstatus.h>
+
 #include "beacon.h"
 #include "bofdefs.h"
 #include "base.c"
@@ -14,12 +15,12 @@ void LookupAccountSids(LSA_HANDLE PolicyHandle, PSID *Sids, ULONG Count) {
     SID_IDENTIFIER_AUTHORITY SIDAuth = SECURITY_NT_AUTHORITY;
 
 
-    Status = LsaLookupSids(PolicyHandle, Count, Sids, &ReferencedDomains, &Names);
+    Status = ADVAPI32$LsaLookupSids(PolicyHandle, Count, Sids, &ReferencedDomains, &Names);
     if (ERROR_SUCCESS != Status) {
         if (Status == STATUS_SOME_NOT_MAPPED) {
             internal_printf("Some SIDs could not be mapped to names.\n");
         } else {
-            internal_printf("LsaLookupSids failed. Error: 0x%lx\n", LsaNtStatusToWinError(Status));
+            internal_printf("LsaLookupSids failed. Error: 0x%lx\n", ADVAPI32$LsaNtStatusToWinError(Status));
             return;
         }
     }
@@ -30,11 +31,25 @@ void LookupAccountSids(LSA_HANDLE PolicyHandle, PSID *Sids, ULONG Count) {
             WCHAR DomainBuffer[256] = {0};
             WCHAR NameBuffer[256] = {0};
 
+            // Ensure string will be null-terminated
+            size_t domainLength = ReferencedDomains->Domains[Names[i].DomainIndex].Name.Length / sizeof(WCHAR);
+            size_t nameLength = Names[i].Name.Length / sizeof(WCHAR);
+
+            // Ensure we do not exceed the buffer size, leave room for null-terminator
+            domainLength = (domainLength < (_countof(DomainBuffer) - 1)) ? domainLength : (_countof(DomainBuffer) - 1);
+            nameLength = (nameLength < (_countof(NameBuffer) - 1)) ? nameLength : (_countof(NameBuffer) - 1);
+
             // Copy the domain name
-            wcsncpy_s(DomainBuffer, _countof(DomainBuffer), ReferencedDomains->Domains[Names[i].DomainIndex].Name.Buffer, ReferencedDomains->Domains[Names[i].DomainIndex].Name.Length / sizeof(WCHAR));
+            errno_t domainErr = MSVCRT$wcscpy_s(DomainBuffer, _countof(DomainBuffer), ReferencedDomains->Domains[Names[i].DomainIndex].Name.Buffer);
+            if (domainErr != 0) {
+                // Handle error
+            }
 
             // Copy the account name
-            wcsncpy_s(NameBuffer, _countof(NameBuffer), Names[i].Name.Buffer, Names[i].Name.Length / sizeof(WCHAR));
+            errno_t nameErr = MSVCRT$wcscpy_s(NameBuffer, _countof(NameBuffer), Names[i].Name.Buffer);
+            if (nameErr != 0) {
+                // Handle error
+            }
 
             // Print the domain and name
             internal_printf("SID %lu: %S\\%S\n", i, DomainBuffer, NameBuffer);
@@ -44,40 +59,52 @@ void LookupAccountSids(LSA_HANDLE PolicyHandle, PSID *Sids, ULONG Count) {
     }
 
     if (ReferencedDomains) {
-        LsaFreeMemory(ReferencedDomains);
+        ADVAPI32$LsaFreeMemory(ReferencedDomains);
     }
     if (Names) {
-        LsaFreeMemory(Names);
+        ADVAPI32$LsaFreeMemory(Names);
     }
 }
 
-DWORD getloggedon(const char * hostname) {
+DWORD getloggedon(LPCSTR computername) {
+
     DWORD dwresult = ERROR_SUCCESS;
-    HKEY hive = HKEY_LOCAL_MACHINE;
-    HKEY RemoteKey = NULL;
+
+    // registry values
+    HKEY hiveroot = HKEY_USERS;
+    HKEY remotekey = NULL;
     HKEY rootkey = NULL;
     TCHAR szKeyName[256];
     DWORD dwKeyNameSize;
     DWORD dwIndex = 0;
     FILETIME ftLastWriteTime;
+
+    // LSA values
     LSA_HANDLE PolicyHandle = NULL;
     LSA_OBJECT_ATTRIBUTES ObjectAttributes;
     PSID *SidArray = NULL;
     ULONG SidCount = 0;
     ULONG MaxSidCount = 256; // Adjust as needed
 
+//    // Output purposes
+//    const char* computerString = computername;
+//    const char* computernameSeparator = "\\";
+//    if(computername == NULL)
+//        computernameSeparator = computerString = "";
+
     // Connect to the remote device registry
-    dwresult = ADVAPI32$RegConnectRegistryA(hostname, hive, &RemoteKey);
-    if (dwresult != ERROR_SUCCESS) {
-        internal_printf("RegConnectRegistryA failed (%lX)\n", dwresult);
+    dwresult = ADVAPI32$RegConnectRegistryA(computername, hiveroot, &remotekey);
+    if(dwresult != ERROR_SUCCESS){
+        DWORD lastError = KERNEL32$GetLastError();
+        BeaconPrintf(CALLBACK_ERROR, "RegConnectRegistryA: Failed to connect to '%s%s%s' [error %d]\n", computername, hiveroot, lastError);
         return dwresult;
     }
 
     // Parse reg keys with user information
-    dwresult = ADVAPI32$RegOpenKeyExA(RemoteKey, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\ProfileList", 0, KEY_READ, &rootkey);
+    dwresult = ADVAPI32$RegOpenKeyExA(remotekey, NULL, 0, KEY_READ, &rootkey);
     if (dwresult != ERROR_SUCCESS) {
         internal_printf("RegOpenKeyExA failed (%lX)\n", dwresult);
-        ADVAPI32$RegCloseKey(RemoteKey);
+        ADVAPI32$RegCloseKey(remotekey);
         return dwresult;
     }
 
@@ -86,7 +113,7 @@ DWORD getloggedon(const char * hostname) {
     if (!SidArray) {
         internal_printf("Memory allocation failed for SID array.\n");
         ADVAPI32$RegCloseKey(rootkey);
-        ADVAPI32$RegCloseKey(RemoteKey);
+        ADVAPI32$RegCloseKey(remotekey);
         return ERROR_NOT_ENOUGH_MEMORY;
     }
 
@@ -94,13 +121,13 @@ DWORD getloggedon(const char * hostname) {
     ZeroMemory(&ObjectAttributes, sizeof(ObjectAttributes));
 
     // Open the policy handle
-    NTSTATUS status = LsaOpenPolicy(NULL, &ObjectAttributes, POLICY_LOOKUP_NAMES, &PolicyHandle);
+    NTSTATUS status = ADVAPI32$LsaOpenPolicy(NULL, &ObjectAttributes, POLICY_LOOKUP_NAMES, &PolicyHandle);
     if (status != STATUS_SUCCESS) {
-        internal_printf("LsaOpenPolicy failed. Error: 0x%lx\n", LsaNtStatusToWinError(status));
+        internal_printf("LsaOpenPolicy failed. Error: 0x%lx\n", ADVAPI32$LsaNtStatusToWinError(status));
         intFree(SidArray);
         ADVAPI32$RegCloseKey(rootkey);
-        ADVAPI32$RegCloseKey(RemoteKey);
-        return LsaNtStatusToWinError(status);
+        ADVAPI32$RegCloseKey(remotekey);
+        return ADVAPI32$LsaNtStatusToWinError(status);
     }
 
     // Enumerate the subkeys to get the SIDs
@@ -146,13 +173,13 @@ DWORD getloggedon(const char * hostname) {
         intFree(SidArray); // Free the array of SIDs
     }
     if (PolicyHandle != NULL) {
-        LsaClose(PolicyHandle); // Close the LSA policy handle
+        ADVAPI32$LsaClose(PolicyHandle); // Close the LSA policy handle
     }
     if (rootkey != NULL) {
         ADVAPI32$RegCloseKey(rootkey); // Close the root key
     }
-    if (RemoteKey != NULL) {
-        ADVAPI32$RegCloseKey(RemoteKey); // Close the remote registry key
+    if (remotekey != NULL) {
+        ADVAPI32$RegCloseKey(remotekey); // Close the remote registry key
     }
 
     return dwresult;
@@ -165,26 +192,17 @@ VOID go(
 )
 {
 	DWORD dwErrorCode = ERROR_SUCCESS;
-	//		$args = bof_pack($1, $packstr, $hostname, $hive, $path, $key, $type, $value);
 	datap parser = {0};
 	const char * hostname = NULL;
-	HKEY hive = (HKEY)0x80000000;
-	const char * path = NULL;
-	const char * key = NULL;
 	DWORD type = 0;
 	const void * data = NULL;
 	DWORD datalen = 0;
-	int t = 0;
 
 	BeaconDataParse(&parser, Buffer, Length);
 	hostname = BeaconDataExtract(&parser, NULL);
-	t = BeaconDataInt(&parser);
 	#pragma GCC diagnostic ignored "-Wint-to-pointer-cast"
 	#pragma GCC diagnostic ignored "-Wpointer-to-int-cast"
-	hive = (HKEY)((DWORD) hive + (DWORD)t);
 	#pragma GCC diagnostic pop
-	path = BeaconDataExtract(&parser, NULL);
-	key = BeaconDataExtract(&parser, NULL);
 	type = BeaconDataInt(&parser);
 	data = BeaconDataExtract(&parser, (int *)&datalen);
 
@@ -225,7 +243,7 @@ go_end:
 	bofstop();
 };
 #else
-#define TEST_HOSTNAME "commando"
+#define TEST_HOSTNAME "DC01"
 int main(int argc, char ** argv)
 {
 
