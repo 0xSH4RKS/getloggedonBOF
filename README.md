@@ -1,4 +1,4 @@
-# getloggedonBOF
+# getloggedon - BOF
 Gets logged on users on a remote machine using remote registry enumeration.
 Doesn't need admin privileges :)
 
