@@ -2,8 +2,6 @@
 Gets logged on users on a remote machine using remote registry enumeration.
 Doesn't need admin privileges :)
 
----
-
 ## Explanation
 This BOF is a proof of concept from the sources linked underneath. It will parse a remote registry key for its subkeys which a normal user has access to.
 The remote registry has certain SIDs listed of logged in users, it will use the local LSA the convert from SID to samaccountname.
