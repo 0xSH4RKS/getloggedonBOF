@@ -8,7 +8,7 @@ Doesn't need admin privileges :)
 This BOF is a proof of concept from the sources linked underneath. It will parse a remote registry key for its subkeys which a normal user has access to.
 The remote registry has certain SIDs listed of logged in users, it will use the local LSA the convert from SID to samaccountname.
 
-<img src="assets/bin_exec_example.png" width=100%>
+<img src="assets/cobalt_strike_bof_execute.png" width=100%>
 
 ## Compilation
 
@@ -16,10 +16,7 @@ Using the makefile with mingw64 on linux device is the easiest:
 
 ```c
 # make the bofs, can be executed using any coff loader
-make
-
-# make test binaries, can be executed as standalone binaries
-make test
+make all
 ```
 
 ## BOF

@@ -1,36 +1,38 @@
-beacon_command_register(
-    "getloggedon",
-    "Gets logged on users on remote machine, using low-level cred access.",
-    "
-Command: getloggedon
-Summary: This command gets logged on users on remote machine, using low-level cred access..
-Usage:   getloggedon <OPT:HOSTNAME>
-         HOSTNAME Optional. The host to connect to and run the command on.
-"
-);
+sub readbof {
+	local('$barch $handle $data $msg $ttp');
+	$barch  = barch($1);
 
-alias getloggedon
-{
-    $bid = $1;
-    $input = substr($0, 12);
-    @args = split(' ', $input);
-    $target = @args[0];
+	# read in the right BOF file
+    println(script_resource("$2 $+ . $+ $barch $+ .o"));
+	$handle = openf(script_resource("$2 $+ . $+ $barch $+ .o"));
+	$data   = readb($handle, -1);
+	closef($handle);
+	if(strlen($data) == 0)
+	{
+		berror($1, "could not read bof file");
+	}
 
-    if ($target eq "") {
-        berror($bid, "Specify an ip or hostname");
-        return;
-    } else {
-
-    }
-
-    # Read in the right BOF file
-    $handle = openf(script_resource("getloggedon." . barch($bid) . ".o"));
-    $data   = readb($handle, -1);
-    closef($handle);
-
-    # Pack our arguments
-    $arg_data  = bof_pack($bid, "Z", $target);
-
-    beacon_inline_execute($bid, $data, "go", $arg_data);
+	$ttp = iff( ($4 eq $null || $4 eq ""), "", $4);
+	$msg = iff( ($3 eq $null || $3 eq ""), "Running $2", $3);
+	$msg = iff( ($ttp ne $null && $ttp ne ""), $msg . " (" . $ttp . ")", $msg);
+	# announce what we're doing
+	blog($1, $msg);
+	btask($1, $msg, $ttp);
+	return $data;
 }
 
+alias getloggedon{
+	local('$args $name');
+	$name = iff(-istrue $2, $2, "");
+	$args = bof_pack($1, "z", $name);
+	beacon_inline_execute($1, readbof($1, "getloggedon", $null, "T1049"), "go", $args);
+}
+
+beacon_command_register(
+	"getloggedon",
+	"Returns users logged on the local (or a remote) machine via the registry",
+	"Usage: getloggedon <opt: computername>
+
+OPSEC: this will convert the SIDs to SAM Account Names through LSA.
+TIP: If you don't want this , use the 'regsession' BOF of the TrustedSec Situational Awareness Suite instead."
+);
